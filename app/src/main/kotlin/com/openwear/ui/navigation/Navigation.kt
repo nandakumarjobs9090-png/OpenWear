@@ -11,6 +11,7 @@ sealed class Screen(val route: String) {
     object Sleep : Screen("sleep")
     object Health : Screen("health")
     object Device : Screen("device")
+    object Settings : Screen("settings")
     object Debug : Screen("debug")
 }
 
@@ -26,4 +27,5 @@ val bottomNavItems = listOf(
     BottomNavItem(Screen.Fitness, "Fitness", Icons.Filled.FitnessCenter, Icons.Outlined.FitnessCenter),
     BottomNavItem(Screen.Sleep, "Sleep", Icons.Filled.Bedtime, Icons.Outlined.Bedtime),
     BottomNavItem(Screen.Health, "Health", Icons.Filled.Favorite, Icons.Outlined.FavoriteBorder),
+    BottomNavItem(Screen.Device, "Device", Icons.Filled.Watch, Icons.Outlined.Watch),
 )

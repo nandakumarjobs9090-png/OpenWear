@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.openwear.data.model.HeartRateEntity
 import com.openwear.data.model.SpO2Entity
 import com.openwear.data.repository.HealthRepository
+import com.openwear.data.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -44,11 +45,17 @@ class HealthViewModel @Inject constructor(
         viewModelScope.launch {
             repository.getRecentHeartRates(200).collect { samples ->
                 _uiState.value = _uiState.value.copy(hrSamples = samples)
+                if (repository.liveHeartRate.value == null && samples.isNotEmpty()) {
+                    _uiState.value = _uiState.value.copy(liveHeartRate = samples.first().bpm)
+                }
             }
         }
         viewModelScope.launch {
             repository.getRecentSpO2().collect { samples ->
                 _uiState.value = _uiState.value.copy(spO2Samples = samples)
+                if (repository.liveSpO2.value == null && samples.isNotEmpty()) {
+                    _uiState.value = _uiState.value.copy(liveSpO2 = samples.first().percent)
+                }
             }
         }
         viewModelScope.launch {
@@ -70,7 +77,8 @@ data class ActivityUiState(
 
 @HiltViewModel
 class ActivityViewModel @Inject constructor(
-    private val repository: HealthRepository
+    private val repository: HealthRepository,
+    private val settings: SettingsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ActivityUiState())
@@ -78,27 +86,62 @@ class ActivityViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
+            settings.stepsGoal.collect { goal ->
+                _uiState.value = _uiState.value.copy(stepsGoal = goal)
+            }
+        }
+        viewModelScope.launch {
             repository.getTodaySteps().collect { today ->
-                _uiState.value = _uiState.value.copy(
-                    todaySteps = today?.count ?: 0,
-                    todayCalories = today?.calories ?: 0,
-                    todayDistanceKm = (today?.distanceMeters ?: 0f) / 1000f
-                )
+                if (repository.liveSteps.value == null) {
+                    _uiState.value = _uiState.value.copy(
+                        todaySteps = today?.count ?: 0,
+                        todayCalories = today?.calories ?: 0,
+                        todayDistanceKm = (today?.distanceMeters ?: 0f) / 1000f
+                    )
+                }
             }
         }
         viewModelScope.launch {
             repository.getWeeklySteps().collect { days ->
-                val labels = repository.getWeekDayLabels()
-                val stepCounts = days.map { it.count }
+                val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                val labelFormat = java.text.SimpleDateFormat("EEE", java.util.Locale.US)
+                
+                val weeklyData = (6 downTo 0).map { offset ->
+                    val cal = java.util.Calendar.getInstance()
+                    cal.add(java.util.Calendar.DAY_OF_YEAR, -offset)
+                    val dateStr = dateFormat.format(cal.time)
+                    val label = labelFormat.format(cal.time)
+                    
+                    val count = days.find { it.date == dateStr }?.count ?: 0
+                    Pair(label, count)
+                }
                 _uiState.value = _uiState.value.copy(
-                    weeklyStepData = stepCounts,
-                    weekLabels = labels
+                    weeklyStepData = weeklyData.map { it.second },
+                    weekLabels = weeklyData.map { it.first }
                 )
             }
         }
         viewModelScope.launch {
             repository.liveSteps.collect { steps ->
-                steps?.let { _uiState.value = _uiState.value.copy(todaySteps = it) }
+                steps?.let { stepCount ->
+                    _uiState.value = _uiState.value.copy(todaySteps = stepCount)
+                    if (repository.liveCalories.value == null) {
+                        _uiState.value = _uiState.value.copy(todayCalories = settings.computeCalories(stepCount))
+                    }
+                    if (repository.liveDistanceMeters.value == null) {
+                        _uiState.value = _uiState.value.copy(todayDistanceKm = settings.computeDistanceMeters(stepCount) / 1000f)
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
+            repository.liveCalories.collect { calories ->
+                calories?.let { _uiState.value = _uiState.value.copy(todayCalories = it) }
+            }
+        }
+        viewModelScope.launch {
+            repository.liveDistanceMeters.collect { distance ->
+                distance?.let { _uiState.value = _uiState.value.copy(todayDistanceKm = it / 1000f) }
             }
         }
     }

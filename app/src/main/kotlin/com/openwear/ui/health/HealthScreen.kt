@@ -28,6 +28,7 @@ fun HealthScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .background(MaterialTheme.colorScheme.background),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(bottom = 100.dp, top = 8.dp)
@@ -63,7 +64,7 @@ fun HealthScreen(
             SpO2OverviewCard(
                 current = uiState.liveSpO2,
                 avgSpO2 = uiState.avgSpO2,
-                samples = uiState.spO2Samples.map { it.percent.toFloat() }
+                samples = uiState.spO2Samples.map { it.percent.toFloat() }.reversed()
             )
         }
 
@@ -189,7 +190,7 @@ private fun HeartRateChartCard(samples: List<HeartRateEntity>) {
         SectionHeader(title = "Heart Rate (24h)")
         Spacer(Modifier.height(16.dp))
         if (samples.isNotEmpty()) {
-            val values = samples.takeLast(60).map { it.bpm.toFloat() }
+            val values = samples.take(60).map { it.bpm.toFloat() }.reversed()
             val min = values.minOrNull()?.toInt() ?: 0
             val max = values.maxOrNull()?.toInt() ?: 0
             Sparkline(
@@ -206,7 +207,7 @@ private fun HeartRateChartCard(samples: List<HeartRateEntity>) {
             }
         } else {
             Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                Text("Connect watch to see heart rate data", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Text("Awaiting live heart rate packets...", color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium)
             }
         }
@@ -257,6 +258,11 @@ private fun SpO2OverviewCard(current: Int?, avgSpO2: Float, samples: List<Float>
                 color = BluePrimary,
                 modifier = Modifier.fillMaxWidth().height(50.dp)
             )
+        } else {
+            Box(Modifier.fillMaxWidth().height(50.dp), contentAlignment = Alignment.Center) {
+                Text("Measure SpO2 on watch to see history", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall)
+            }
         }
         Spacer(Modifier.height(12.dp))
         Text(

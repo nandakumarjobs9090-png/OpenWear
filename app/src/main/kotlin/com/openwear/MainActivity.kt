@@ -28,6 +28,7 @@ import com.openwear.ui.health.HealthScreen
 import com.openwear.ui.home.HomeScreen
 import com.openwear.ui.navigation.Screen
 import com.openwear.ui.navigation.bottomNavItems
+import com.openwear.ui.settings.SettingsScreen
 import com.openwear.ui.sleep.SleepScreen
 import com.openwear.ui.theme.OpenWearTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -36,6 +37,27 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        val requestPermissionLauncher = registerForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+        ) { permissions ->
+            val allGranted = permissions.entries.all { it.value }
+            android.util.Log.d("OpenWear:MainActivity", "Permissions result: allGranted=$allGranted")
+        }
+
+        val permissionsList = mutableListOf(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            permissionsList.add(android.Manifest.permission.BLUETOOTH_SCAN)
+            permissionsList.add(android.Manifest.permission.BLUETOOTH_CONNECT)
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            permissionsList.add(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+        requestPermissionLauncher.launch(permissionsList.toTypedArray())
+
         enableEdgeToEdge()
         setContent {
             OpenWearTheme {
@@ -102,7 +124,8 @@ fun OpenWearMainApp() {
         ) {
             composable(Screen.Today.route) {
                 HomeScreen(
-                    onNavigateToDevice = { navController.navigate(Screen.Device.route) }
+                    onNavigateToDevice = { navController.navigate(Screen.Device.route) },
+                    onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
                 )
             }
             composable(Screen.Fitness.route) {
@@ -118,6 +141,9 @@ fun OpenWearMainApp() {
                 DeviceScreen(
                     onNavigateToDebug = { navController.navigate(Screen.Debug.route) }
                 )
+            }
+            composable(Screen.Settings.route) {
+                SettingsScreen()
             }
             composable(Screen.Debug.route) {
                 DebugScreen()
@@ -161,29 +187,5 @@ private fun OpenWearBottomBar(
                 )
             )
         }
-
-        // Device tab (not in main bottom nav items, separate icon)
-        val isDeviceSelected = currentDestination?.route == Screen.Device.route
-        NavigationBarItem(
-            icon = {
-                Icon(
-                    imageVector = if (isDeviceSelected)
-                        Icons.Filled.Watch
-                    else
-                        Icons.Outlined.Watch,
-                    contentDescription = "Device"
-                )
-            },
-            label = { Text("Device") },
-            selected = isDeviceSelected,
-            onClick = { onNavigate(Screen.Device) },
-            colors = NavigationBarItemDefaults.colors(
-                selectedIconColor = MaterialTheme.colorScheme.primary,
-                selectedTextColor = MaterialTheme.colorScheme.primary,
-                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                indicatorColor = MaterialTheme.colorScheme.primaryContainer
-            )
-        )
     }
 }

@@ -39,6 +39,18 @@ interface HealthDao {
     @Query("SELECT SUM(count) FROM steps WHERE date BETWEEN :startDate AND :endDate")
     suspend fun getTotalStepsBetween(startDate: String, endDate: String): Int?
 
+    @Query("DELETE FROM steps WHERE date = :date")
+    suspend fun deleteTodaySteps(date: String)
+
+    @Query("DELETE FROM heart_rate WHERE date(timestamp / 1000, 'unixepoch', 'localtime') = :date")
+    suspend fun deleteTodayHeartRates(date: String)
+
+    @Query("DELETE FROM spo2 WHERE date(timestamp / 1000, 'unixepoch', 'localtime') = :date")
+    suspend fun deleteTodaySpO2(date: String)
+
+    @Query("SELECT * FROM heart_rate ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestHeartRate(): HeartRateEntity?
+
     // --- Sleep ---
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSleep(entity: SleepEntity)

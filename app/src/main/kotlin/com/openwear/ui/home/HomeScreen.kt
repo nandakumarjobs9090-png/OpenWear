@@ -31,6 +31,7 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
     onNavigateToDevice: () -> Unit,
+    onNavigateToSettings: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -50,7 +51,7 @@ fun HomeScreen(
                 dateText = today,
                 isConnected = uiState.connectionState is BleConnectionState.Connected,
                 battery = uiState.battery,
-                onDeviceClick = onNavigateToDevice
+                onSettingsClick = onNavigateToSettings
             )
         }
 
@@ -68,8 +69,19 @@ fun HomeScreen(
         item {
             HeartRateCard(
                 heartRate = uiState.heartRate,
-                hrSamples = emptyList() // passed from ViewModel if needed
+                hrSamples = uiState.hrSamples
             )
+        }
+
+        // Weather Card
+        if (uiState.weatherTemp != null) {
+            item {
+                WeatherCard(
+                    temp = uiState.weatherTemp,
+                    condition = uiState.weatherCondition,
+                    emoji = uiState.weatherEmoji
+                )
+            }
         }
 
         // Sleep Card
@@ -77,11 +89,9 @@ fun HomeScreen(
             SleepSummaryCard(sleepHours = uiState.sleepHours)
         }
 
-        // SpO2 Card
-        uiState.spO2?.let { spo2 ->
-            item {
-                SpO2Card(percent = spo2)
-            }
+        // SpO2 Card — always show
+        item {
+            SpO2Card(percent = uiState.spO2)
         }
 
         // Weekly activity bar chart
@@ -99,11 +109,12 @@ private fun HomeTopBar(
     dateText: String,
     isConnected: Boolean,
     battery: Int?,
-    onDeviceClick: () -> Unit
+    onSettingsClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .statusBarsPadding()
             .padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
@@ -126,15 +137,15 @@ private fun HomeTopBar(
         ) {
             ConnectionBadge(isConnected = isConnected)
             IconButton(
-                onClick = onDeviceClick,
+                onClick = onSettingsClick,
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Watch,
-                    contentDescription = "Device",
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings",
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
@@ -297,7 +308,7 @@ private fun QuickStatsRow(uiState: com.openwear.viewmodel.HomeUiState) {
 @Composable
 private fun HeartRateCard(
     heartRate: Int?,
-    hrSamples: List<Float>
+    hrSamples: List<Int>
 ) {
     StatCard(modifier = Modifier
         .fillMaxWidth()
@@ -342,7 +353,7 @@ private fun HeartRateCard(
         if (hrSamples.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Sparkline(
-                values = hrSamples,
+                values = hrSamples.map { it.toFloat() },
                 color = CoralPrimary,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -391,7 +402,7 @@ private fun SleepSummaryCard(sleepHours: Float) {
 }
 
 @Composable
-private fun SpO2Card(percent: Int) {
+private fun SpO2Card(percent: Int?) {
     StatCard(modifier = Modifier
         .fillMaxWidth()
         .padding(horizontal = 20.dp)) {
@@ -408,7 +419,7 @@ private fun SpO2Card(percent: Int) {
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                text = "$percent",
+                text = percent?.toString() ?: "--",
                 style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -419,12 +430,17 @@ private fun SpO2Card(percent: Int) {
                 modifier = Modifier.padding(bottom = 4.dp)
             )
         }
-        val status = when {
-            percent >= 95 -> "Normal" to GreenPrimary
-            percent >= 90 -> "Low" to OrangePrimary
-            else -> "Very Low" to CoralPrimary
+        Spacer(Modifier.height(4.dp))
+        if (percent != null) {
+            val status = when {
+                percent >= 95 -> "Normal" to GreenPrimary
+                percent >= 90 -> "Low" to OrangePrimary
+                else -> "Very Low" to CoralPrimary
+            }
+            Text(status.first, style = MaterialTheme.typography.labelMedium, color = status.second)
+        } else {
+            Text("Measure on your watch", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(status.first, style = MaterialTheme.typography.labelMedium, color = status.second)
     }
 }
 
@@ -456,6 +472,37 @@ private fun WeeklyActivityCard(weeklySteps: List<com.openwear.data.model.WeeklyS
                     color = if (day.goalMet) TealPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun WeatherCard(
+    temp: Float?,
+    condition: String?,
+    emoji: String?
+) {
+    if (temp == null) return
+    StatCard(modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 20.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(emoji ?: "⛅", style = androidx.compose.ui.text.TextStyle(fontSize = 28.sp))
+                Column {
+                    Text("Weather", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(condition ?: "Cloudy", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Text(
+                text = "${temp.toInt()}°C",
+                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
         }
     }
 }

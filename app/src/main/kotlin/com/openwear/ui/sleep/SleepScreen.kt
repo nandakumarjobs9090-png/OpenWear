@@ -28,6 +28,7 @@ fun SleepScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .background(MaterialTheme.colorScheme.background),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(bottom = 100.dp, top = 8.dp)
@@ -42,30 +43,75 @@ fun SleepScreen(
             }
         }
 
-        // Last night sleep arc + details
-        item {
-            LastNightCard(uiState = uiState)
-        }
+        if (uiState.lastNightHours > 0f) {
+            // Last night sleep arc + details
+            item {
+                LastNightCard(uiState = uiState)
+            }
 
-        // Sleep stages breakdown
-        if (uiState.lastNightHours > 0) {
+            // Sleep stages breakdown
             item {
                 SleepStagesCard(uiState = uiState)
             }
-        }
 
-        // Weekly sleep chart
-        item {
-            WeeklySleepCard(
-                sleepHours = uiState.weeklySleepHours,
-                labels = uiState.weekLabels,
-                avgHours = uiState.avgSleepHours
-            )
+            // Weekly sleep chart
+            item {
+                WeeklySleepCard(
+                    sleepHours = uiState.weeklySleepHours,
+                    labels = uiState.weekLabels,
+                    avgHours = uiState.avgSleepHours
+                )
+            }
+        } else {
+            item {
+                SleepEmptyStateCard()
+            }
         }
 
         // Sleep tips
         item {
             SleepTipsCard()
+        }
+    }
+}
+
+@Composable
+private fun SleepEmptyStateCard() {
+    StatCard(modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 20.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(bottom = 12.dp)
+        ) {
+            Icon(Icons.Default.Bedtime, null, tint = PurplePrimary, modifier = Modifier.size(22.dp))
+            Text("Sleep Tracking", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
+        Text(
+            text = "No sleep data has been synchronized yet.",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Because OpenWear is an open-source companion app built from reverse-engineering, some data formats (like multi-stage sleep logs) require active capture to decode.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = "How to sync sleep data:",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.height(6.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("• Wear your watch to sleep tonight.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("• Keep the app running in the background.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("• Export the CSV logs tomorrow if sleep data doesn't load!", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

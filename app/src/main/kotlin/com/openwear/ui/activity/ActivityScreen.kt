@@ -31,6 +31,7 @@ fun ActivityScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .background(MaterialTheme.colorScheme.background),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(bottom = 100.dp, top = 8.dp)
@@ -61,7 +62,8 @@ fun ActivityScreen(
         item {
             WeeklyStepsCard(
                 stepData = uiState.weeklyStepData,
-                labels = uiState.weekLabels
+                labels = uiState.weekLabels,
+                goal = uiState.stepsGoal
             )
         }
 
@@ -142,7 +144,8 @@ private fun StepSubStat(icon: ImageVector, value: String, label: String, color: 
 @Composable
 private fun WeeklyStepsCard(
     stepData: List<Int>,
-    labels: List<String>
+    labels: List<String>,
+    goal: Int
 ) {
     StatCard(modifier = Modifier
         .fillMaxWidth()
@@ -154,7 +157,7 @@ private fun WeeklyStepsCard(
                 values = stepData.map { it.toFloat() },
                 labels = labels,
                 barColor = GreenPrimary,
-                goalLine = 8000f,
+                goalLine = goal.toFloat(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(100.dp)

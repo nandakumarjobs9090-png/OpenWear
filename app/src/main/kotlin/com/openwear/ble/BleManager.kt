@@ -77,6 +77,10 @@ class BleManager @Inject constructor(
             syncTime(gatt)
             // Request device info
             requestDeviceInfo(gatt)
+            // Delay historical data sync to allow notifications to initialize
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                requestSync()
+            }, 1000)
         }
 
         override fun onCharacteristicChanged(
@@ -125,11 +129,22 @@ class BleManager @Inject constructor(
 
     fun connect(device: BluetoothDevice) {
         Log.d(TAG, "Connecting to ${device.name} (${device.address})")
+        resetDailyData() // Clear stale data before new connection
         _connectionState.value = BleConnectionState.Connecting(device)
         bluetoothGatt?.close()
         notificationIndex = 0
         notificationQueue.clear()
         bluetoothGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+    }
+
+    /** Clear all live data flows to null so the UI shows '--' until fresh BLE packets arrive. */
+    fun resetDailyData() {
+        _heartRate.value = null
+        _steps.value = null
+        _spO2.value = null
+        _calories.value = null
+        _distanceMeters.value = null
+        Log.d(TAG, "Live data cache cleared — awaiting fresh BLE packets")
     }
 
     fun disconnect() {
@@ -246,26 +261,38 @@ class BleManager @Inject constructor(
 
         when (packetType) {
             0x07 -> {
-                // Status frame
+                // Status frame (Daily activity data)
+                if (data.size >= 3) {
+                    val steps = ((data[2].toInt() and 0xFF) shl 8) or (data[1].toInt() and 0xFF)
+                    if (steps >= 0) {
+                        _steps.value = steps
+                        Log.d(TAG, "Steps decoded: $steps")
+                    }
+                }
+                if (data.size >= 6) {
+                    val rawCalories = ((data[5].toInt() and 0xFF) shl 8) or (data[4].toInt() and 0xFF)
+                    val calories = rawCalories / 10 // Convert from tenths of a kcal to kcal
+                    if (calories >= 0) {
+                        _calories.value = calories
+                        Log.d(TAG, "Calories decoded: $calories kcal")
+                    }
+                }
+                if (data.size >= 9) {
+                    val rawDistanceCm = ((data[8].toInt() and 0xFF) shl 8) or (data[7].toInt() and 0xFF)
+                    val distanceMeters = rawDistanceCm / 100f // Convert from cm to meters
+                    if (distanceMeters >= 0f) {
+                        _distanceMeters.value = distanceMeters
+                        Log.d(TAG, "Distance decoded: $distanceMeters meters")
+                    }
+                }
+            }
+            0x08 -> {
+                // Heart rate packet
                 if (data.size >= 2) {
                     val hr = data[1].toInt() and 0xFF
                     if (hr in 30..220) {
                         _heartRate.value = hr
                         Log.d(TAG, "Heart rate decoded: $hr bpm")
-                    }
-                }
-                if (data.size >= 5) {
-                    val battery = data[4].toInt() and 0xFF
-                    if (battery in 0..100) {
-                        _battery.value = battery
-                        Log.d(TAG, "Battery level decoded: $battery%")
-                    }
-                }
-                if (data.size >= 9) {
-                    val steps = ((data[8].toInt() and 0xFF) shl 8) or (data[7].toInt() and 0xFF)
-                    if (steps >= 0) {
-                        _steps.value = steps
-                        Log.d(TAG, "Steps: $steps")
                     }
                 }
             }
@@ -329,22 +356,53 @@ class BleManager @Inject constructor(
 
     /**
      * Sync current time to the watch.
-     * Standard BLE time sync command (placeholder — refine with actual DIZO protocol).
+     * Standard BLE time sync command following the format:
+     * [0x01] [year_high] [year_low] [month] [day] [hour] [minute] [second] [day_of_week]
      */
     private fun syncTime(gatt: BluetoothGatt) {
-        val now = System.currentTimeMillis() / 1000
-        val year = (java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) - 1900).toByte()
-        // Time sync command — 0x01 0x00 is a common smartwatch pattern
-        val cmd = byteArrayOf(0x01, 0x00, year)
-        Log.d(TAG, "Syncing time to watch")
-        // writeCommand(DizoUuids.SERVICE_PRIMARY, DizoUuids.CHAR_FF02_WRITE, cmd)
+        val calendar = java.util.Calendar.getInstance()
+        val year = calendar.get(java.util.Calendar.YEAR)
+        val month = (calendar.get(java.util.Calendar.MONTH) + 1).toByte()
+        val day = calendar.get(java.util.Calendar.DAY_OF_MONTH).toByte()
+        val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY).toByte()
+        val minute = calendar.get(java.util.Calendar.MINUTE).toByte()
+        val second = calendar.get(java.util.Calendar.SECOND).toByte()
+        val dayOfWeek = calendar.get(java.util.Calendar.DAY_OF_WEEK).toByte() // 1 = Sunday, 2 = Monday...
+
+        val cmd = byteArrayOf(
+            0x01,
+            ((year shr 8) and 0xFF).toByte(),
+            (year and 0xFF).toByte(),
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            dayOfWeek
+        )
+        Log.d(TAG, "Syncing time to watch: Year=$year, Month=$month, Day=$day, Time=$hour:$minute:$second")
+        writeCommand(DizoUuids.SERVICE_PRIMARY, DizoUuids.CHAR_FF02_WRITE, cmd)
+    }
+
+    /**
+     * Request historical data sync from the watch.
+     */
+    fun requestSync() {
+        Log.d(TAG, "Requesting historical data sync from watch (steps, sleep, heart rate, SpO2)")
+        // 0x03 0x01 -> sync steps/activity history
+        writeCommand(DizoUuids.SERVICE_PRIMARY, DizoUuids.CHAR_FF02_WRITE, byteArrayOf(0x03, 0x01))
+        // 0x03 0x02 -> sync sleep history
+        writeCommand(DizoUuids.SERVICE_PRIMARY, DizoUuids.CHAR_FF02_WRITE, byteArrayOf(0x03, 0x02))
+        // 0x03 0x03 -> sync heart rate history
+        writeCommand(DizoUuids.SERVICE_PRIMARY, DizoUuids.CHAR_FF02_WRITE, byteArrayOf(0x03, 0x03))
+        // 0x03 0x04 -> sync SpO2 history
+        writeCommand(DizoUuids.SERVICE_PRIMARY, DizoUuids.CHAR_FF02_WRITE, byteArrayOf(0x03, 0x04))
     }
 
     /**
      * Request device info (battery, firmware version).
      */
     private fun requestDeviceInfo(gatt: BluetoothGatt) {
-        // Try to read battery from d0ff service
         val service = gatt.getService(UUID.fromString(DizoUuids.SERVICE_SECONDARY))
         val ffd2 = service?.getCharacteristic(UUID.fromString(DizoUuids.CHAR_FFD2))
         ffd2?.let { gatt.readCharacteristic(it) }
