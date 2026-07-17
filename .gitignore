@@ -1,0 +1,60 @@
+# Android build artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Java/Kotlin build output
+*.class
+bin/
+gen/
+out/
+
+# Gradle build directories
+.gradle/
+build/
+app/build/
+
+# Local configuration (never share these)
+local.properties
+keystore.properties
+*.jks
+*.keystore
+*.p12
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+.navigation/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Kotlin incremental compilation
+.kotlin/
+
+# OS-generated
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V8
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Logs pulled from the phone (dev only)
+logs/
+
+# Temp files
+DeviceScreen_temp.kt
+
+# ProGuard
+*.map
+*.sdk
+
+# Dependency locking
+buildscript-gradle.lockfile
+gradle.lockfile
