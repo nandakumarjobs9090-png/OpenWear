@@ -28,6 +28,18 @@ class BleManager @Inject constructor(
     private val _packetFlow = MutableSharedFlow<BlePacket>(replay = 50, extraBufferCapacity = 200)
     val packetFlow: SharedFlow<BlePacket> = _packetFlow.asSharedFlow()
 
+    /** Add readable GATT diagnostics to the in-app packet logger. */
+    private fun diagnostic(message: String) {
+        Log.i(TAG, "DIAG: $message")
+        _packetFlow.tryEmit(
+            BlePacket(
+                serviceUuid = "diagnostic",
+                characteristicUuid = "diagnostic",
+                data = message.toByteArray(Charsets.UTF_8)
+            )
+        )
+    }
+
     private val _heartRate = MutableStateFlow<Int?>(null)
     val heartRate: StateFlow<Int?> = _heartRate.asStateFlow()
 
@@ -52,12 +64,14 @@ class BleManager @Inject constructor(
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     Log.d(TAG, "GATT connected. Discovering services...")
+                    diagnostic("GATT CONNECTED; starting service discovery")
                     _connectionState.value = BleConnectionState.Connected(
                         gatt.device, gatt.device.name ?: "Unknown"
                     )
                     gatt.discoverServices()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
+                    diagnostic("GATT DISCONNECTED; status=$status")
                     Log.d(TAG, "GATT disconnected (status=$status)")
                     _connectionState.value = BleConnectionState.Disconnected
                     bluetoothGatt = null
@@ -66,21 +80,17 @@ class BleManager @Inject constructor(
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+            diagnostic("SERVICE DISCOVERY callback status=$status (${if (status == BluetoothGatt.GATT_SUCCESS) "SUCCESS" else "FAILED"})")
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 Log.e(TAG, "Service discovery failed: $status")
+                diagnostic("SERVICE DISCOVERY FAILED; disconnect and retry")
                 return
             }
             Log.d(TAG, "Services discovered. Enabling notifications...")
             logAllServices(gatt)
             enableNotifications(gatt)
-            // Sync time after connect
-            syncTime(gatt)
-            // Request device info
-            requestDeviceInfo(gatt)
-            // Delay historical data sync to allow notifications to initialize
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                requestSync()
-            }, 1000)
+            // Diagnostic-only build: do not send unverified vendor commands.
+            diagnostic("Automatic time sync and historical sync commands disabled for safe diagnosis")
         }
 
         override fun onCharacteristicChanged(
@@ -116,11 +126,13 @@ class BleManager @Inject constructor(
             descriptor: BluetoothGattDescriptor,
             status: Int
         ) {
+            val charUuid = descriptor.characteristic.uuid.toString().lowercase()
+            diagnostic("CCCD WRITE $charUuid status=$status (${if (status == BluetoothGatt.GATT_SUCCESS) "SUCCESS" else "FAILED"})")
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.d(TAG, "Notification enabled for: ${descriptor.characteristic.uuid}")
-                // Enable next notification in queue
-                enableNextNotification(gatt)
             }
+            // Continue even after a failed descriptor write so all targets are tested.
+            enableNextNotification(gatt)
         }
     }
 
@@ -189,10 +201,17 @@ class BleManager @Inject constructor(
             val service = gatt.getService(UUID.fromString(serviceUuid))
             val characteristic = service?.getCharacteristic(UUID.fromString(charUuid))
             if (characteristic != null) {
-                notificationQueue.add(serviceUuid to charUuid)
+                val props = characteristic.properties
+                val notify = (props and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
+                val indicate = (props and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
+                diagnostic("TARGET FOUND service=$serviceUuid char=$charUuid properties=$props notify=$notify indicate=$indicate")
+                if (notify || indicate) notificationQueue.add(serviceUuid to charUuid)
+                else diagnostic("TARGET HAS NO NOTIFY/INDICATE PROPERTY: $charUuid")
+            } else {
+                diagnostic("TARGET MISSING service=$serviceUuid char=$charUuid")
             }
         }
-
+        diagnostic("Notification targets queued=${notificationQueue.size}")
         enableNextNotification(gatt)
     }
 
@@ -210,13 +229,22 @@ class BleManager @Inject constructor(
             return
         }
 
-        gatt.setCharacteristicNotification(characteristic, true)
+        val localEnabled = gatt.setCharacteristicNotification(characteristic, true)
+        diagnostic("setCharacteristicNotification char=$charUuid result=$localEnabled")
         val descriptor = characteristic.getDescriptor(UUID.fromString(DizoUuids.CCCD))
         descriptor?.let {
-            it.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            it.value = if ((characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0 &&
+                (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY) == 0) {
+                BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+            } else {
+                BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+            }
             @Suppress("DEPRECATION")
-            gatt.writeDescriptor(it)
+            val started = gatt.writeDescriptor(it)
+            diagnostic("writeDescriptor started=$started char=$charUuid")
+            if (!started) enableNextNotification(gatt)
         } ?: run {
+            diagnostic("CCCD 0x2902 MISSING for $charUuid")
             enableNextNotification(gatt)
         }
     }
@@ -407,10 +435,21 @@ class BleManager @Inject constructor(
     }
 
     private fun logAllServices(gatt: BluetoothGatt) {
+        diagnostic("DISCOVERED SERVICES count=${gatt.services.size}")
         gatt.services.forEach { service ->
             Log.d(TAG, "Service: ${service.uuid}")
+            diagnostic("SERVICE ${service.uuid}")
             service.characteristics.forEach { char ->
+                val p = char.properties
+                val flags = buildList {
+                    if (p and BluetoothGattCharacteristic.PROPERTY_READ != 0) add("READ")
+                    if (p and BluetoothGattCharacteristic.PROPERTY_WRITE != 0) add("WRITE")
+                    if (p and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0) add("WRITE_NO_RESPONSE")
+                    if (p and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) add("NOTIFY")
+                    if (p and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) add("INDICATE")
+                }.joinToString("|").ifEmpty { "NONE" }
                 Log.d(TAG, "  Char: ${char.uuid} props=${char.properties}")
+                diagnostic("CHAR ${char.uuid} properties=$p flags=$flags cccd=${char.getDescriptor(UUID.fromString(DizoUuids.CCCD)) != null}")
             }
         }
     }
