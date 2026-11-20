@@ -50,6 +50,10 @@ sealed class BleConnectionState {
  * Known DIZO Watch R BLE UUIDs
  */
 object DizoUuids {
+    // Talk Go UUIDs observed in the user's BLE service discovery and packet capture.
+    const val SERVICE_TALKGO_REALTIME = "000055ff-0000-1000-8000-00805f9b34fb"
+    const val CHAR_TALKGO_REALTIME_NOTIFY = "000033f2-0000-1000-8000-00805f9b34fb"
+
     // Service UUIDs
     const val SERVICE_PRIMARY = "000001ff-3c17-d293-8e48-14fe2e4da212"
     const val SERVICE_SECONDARY = "0000d0ff-3c17-d293-8e48-14fe2e4da212"
