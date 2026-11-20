@@ -98,7 +98,7 @@ class BleManager @Inject constructor(
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
-            handlePacket(characteristic.uuid.toString().lowercase(), value)
+            handlePacket(characteristic.service.uuid.toString().lowercase(), characteristic.uuid.toString().lowercase(), value)
         }
 
         @Deprecated("Used for API < 33")
@@ -107,7 +107,7 @@ class BleManager @Inject constructor(
             characteristic: BluetoothGattCharacteristic
         ) {
             @Suppress("DEPRECATION")
-            handlePacket(characteristic.uuid.toString().lowercase(), characteristic.value ?: return)
+            handlePacket(characteristic.service.uuid.toString().lowercase(), characteristic.uuid.toString().lowercase(), characteristic.value ?: return)
         }
 
         override fun onCharacteristicRead(
@@ -117,7 +117,7 @@ class BleManager @Inject constructor(
             status: Int
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                handlePacket(characteristic.uuid.toString().lowercase(), value)
+                handlePacket(characteristic.service.uuid.toString().lowercase(), characteristic.uuid.toString().lowercase(), value)
             }
         }
 
@@ -188,30 +188,38 @@ class BleManager @Inject constructor(
     }
 
     private fun enableNotifications(gatt: BluetoothGatt) {
-        // Build queue of all notification characteristics
+        // Talk Go exposes a different GATT layout from the original Watch R.
+        // Passively subscribe to discovered NOTIFY/INDICATE characteristics,
+        // but deliberately exclude the Realtek DFU service and HID service.
+        // No vendor commands or firmware-update writes are sent by this diagnostic.
         notificationQueue.clear()
         notificationIndex = 0
 
-        val targets = listOf(
-            DizoUuids.SERVICE_FEE7 to DizoUuids.CHAR_FEA1_NOTIFY,
-            DizoUuids.SERVICE_PRIMARY to DizoUuids.CHAR_FF03_NOTIFY,
+        val excludedServices = setOf(
+            "00006287-3c17-d293-8e48-14fe2e4da212", // Realtek DFU service
+            "00001812-0000-1000-8000-00805f9b34fb"  // HID service
         )
 
-        targets.forEach { (serviceUuid, charUuid) ->
-            val service = gatt.getService(UUID.fromString(serviceUuid))
-            val characteristic = service?.getCharacteristic(UUID.fromString(charUuid))
-            if (characteristic != null) {
+        gatt.services.forEach { service ->
+            val serviceUuid = service.uuid.toString().lowercase()
+            if (serviceUuid in excludedServices) {
+                diagnostic("PASSIVE SUBSCRIBE SKIPPED service=$serviceUuid (DFU/HID safety exclusion)")
+                return@forEach
+            }
+            service.characteristics.forEach { characteristic ->
                 val props = characteristic.properties
                 val notify = (props and BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
                 val indicate = (props and BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0
-                diagnostic("TARGET FOUND service=$serviceUuid char=$charUuid properties=$props notify=$notify indicate=$indicate")
-                if (notify || indicate) notificationQueue.add(serviceUuid to charUuid)
-                else diagnostic("TARGET HAS NO NOTIFY/INDICATE PROPERTY: $charUuid")
-            } else {
-                diagnostic("TARGET MISSING service=$serviceUuid char=$charUuid")
+                if (notify || indicate) {
+                    val charUuid = characteristic.uuid.toString().lowercase()
+                    val hasCccd = characteristic.getDescriptor(UUID.fromString(DizoUuids.CCCD)) != null
+                    diagnostic("PASSIVE NOTIFY CANDIDATE service=$serviceUuid char=$charUuid notify=$notify indicate=$indicate cccd=$hasCccd")
+                    if (hasCccd) notificationQueue.add(serviceUuid to charUuid)
+                    else diagnostic("SKIP candidate without CCCD char=$charUuid")
+                }
             }
         }
-        diagnostic("Notification targets queued=${notificationQueue.size}")
+        diagnostic("PASSIVE notification targets queued=${notificationQueue.size}; no protocol writes will be sent")
         enableNextNotification(gatt)
     }
 
@@ -249,8 +257,7 @@ class BleManager @Inject constructor(
         }
     }
 
-    private fun handlePacket(charUuid: String, data: ByteArray) {
-        val serviceUuid = getServiceForChar(charUuid)
+    private fun handlePacket(serviceUuid: String, charUuid: String, data: ByteArray) {
         Log.d(TAG, "PKT [$charUuid] ${data.joinToString(" ") { "%02X".format(it) }}")
 
         val packet = BlePacket(
