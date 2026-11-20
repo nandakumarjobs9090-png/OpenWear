@@ -267,16 +267,51 @@ class BleManager @Inject constructor(
         )
         _packetFlow.tryEmit(packet)
 
-        // Try to decode known packet types
-        decodePacket(charUuid, data)
+        // Decode only packet formats matched to the actual service + characteristic.
+        decodePacket(serviceUuid, charUuid, data)
     }
 
-    private fun decodePacket(charUuid: String, data: ByteArray) {
+    private fun decodePacket(serviceUuid: String, charUuid: String, data: ByteArray) {
         if (data.isEmpty()) return
+
+        // Talk Go capture: manual heart-rate measurement streams E5 11 00 <bpm>
+        // on service 000055ff / characteristic 000033f2.
+        if (serviceUuid == DizoUuids.SERVICE_TALKGO_REALTIME.lowercase() &&
+            charUuid == DizoUuids.CHAR_TALKGO_REALTIME_NOTIFY.lowercase()) {
+            decodeTalkGoRealtime(data)
+            return
+        }
 
         when (charUuid) {
             DizoUuids.CHAR_FEA1_NOTIFY.lowercase() -> decodeFEA1(data)
             DizoUuids.CHAR_FF03_NOTIFY.lowercase() -> decodeFF03(data)
+        }
+    }
+
+    /**
+     * Decode the Talk Go's observed manual heart-rate notification.
+     * Captured packets use E5 11 00 XX on 000055ff/000033f2.
+     * XX is the BPM byte (e.g. 0x53 = 83, 0x58 = 88).
+     * A zero value is treated as no current measurement, not 0 BPM.
+     */
+    private fun decodeTalkGoRealtime(data: ByteArray) {
+        if (data.size != 4 ||
+            (data[0].toInt() and 0xFF) != 0xE5 ||
+            (data[1].toInt() and 0xFF) != 0x11 ||
+            (data[2].toInt() and 0xFF) != 0x00) {
+            Log.d(TAG, "Talk Go realtime packet not recognised: ${data.joinToString(" ") { "%02X".format(it) }}")
+            return
+        }
+
+        val bpm = data[3].toInt() and 0xFF
+        if (bpm == 0) {
+            _heartRate.value = null
+            Log.d(TAG, "Talk Go heart-rate stream reports no active reading")
+        } else if (bpm in 30..220) {
+            _heartRate.value = bpm
+            Log.d(TAG, "Talk Go live heart rate: $bpm bpm")
+        } else {
+            Log.w(TAG, "Ignoring out-of-range Talk Go heart-rate value: $bpm")
         }
     }
 
