@@ -246,73 +246,71 @@ class BleManager @Inject constructor(
     }
 
     /**
-     * Decode FEA1 heartbeat/status packets.
-     * Observed: 07 83 00 00 58 00 00 CC 13 00
-     * Based on analysis:
-     *   [0]    = 0x07: packet type (status frame)
-     *   [1]    = flags / sub-type
-     *   [4]    = heart rate (0x58 = 88 bpm) — if non-zero
-     *   [7-8]  = step count little-endian (0xCC 0x13 = 5068 steps)
+     * Decode FEA1 live status packets using the layout documented in README.md.
+     * For a 10-byte 0x07 frame:
+     *   [0]    = 0x07 packet type
+     *   [1]    = heart rate (bpm)
+     *   [4]    = battery percentage
+     *   [7-8]  = steps, unsigned 16-bit little-endian
+     *
+     * Keep this decoder conservative: only publish fields documented by the
+     * current protocol notes. Other packet types remain best-effort until
+     * confirmed from a Talk Go packet capture.
      */
     private fun decodeFEA1(data: ByteArray) {
-        if (data.size < 6) return
+        if (data.isEmpty()) return
 
         val packetType = data[0].toInt() and 0xFF
-
         when (packetType) {
             0x07 -> {
-                // Status frame (Daily activity data)
-                if (data.size >= 3) {
-                    val steps = ((data[2].toInt() and 0xFF) shl 8) or (data[1].toInt() and 0xFF)
-                    if (steps >= 0) {
-                        _steps.value = steps
-                        Log.d(TAG, "Steps decoded: $steps")
-                    }
-                }
-                if (data.size >= 6) {
-                    val rawCalories = ((data[5].toInt() and 0xFF) shl 8) or (data[4].toInt() and 0xFF)
-                    val calories = rawCalories / 10 // Convert from tenths of a kcal to kcal
-                    if (calories >= 0) {
-                        _calories.value = calories
-                        Log.d(TAG, "Calories decoded: $calories kcal")
-                    }
-                }
-                if (data.size >= 9) {
-                    val rawDistanceCm = ((data[8].toInt() and 0xFF) shl 8) or (data[7].toInt() and 0xFF)
-                    val distanceMeters = rawDistanceCm / 100f // Convert from cm to meters
-                    if (distanceMeters >= 0f) {
-                        _distanceMeters.value = distanceMeters
-                        Log.d(TAG, "Distance decoded: $distanceMeters meters")
-                    }
-                }
-            }
-            0x08 -> {
-                // Heart rate packet
                 if (data.size >= 2) {
                     val hr = data[1].toInt() and 0xFF
                     if (hr in 30..220) {
                         _heartRate.value = hr
-                        Log.d(TAG, "Heart rate decoded: $hr bpm")
+                        Log.d(TAG, "Heart rate decoded from status frame: $hr bpm")
+                    }
+                }
+                if (data.size >= 5) {
+                    val battery = data[4].toInt() and 0xFF
+                    if (battery in 0..100) {
+                        _battery.value = battery
+                        Log.d(TAG, "Battery decoded from status frame: $battery%")
+                    }
+                }
+                if (data.size >= 9) {
+                    val steps = (data[7].toInt() and 0xFF) or
+                        ((data[8].toInt() and 0xFF) shl 8)
+                    _steps.value = steps
+                    Log.d(TAG, "Steps decoded from status frame: $steps")
+                }
+            }
+            0x08 -> {
+                // Retain the existing possible standalone HR frame as a fallback.
+                if (data.size >= 2) {
+                    val hr = data[1].toInt() and 0xFF
+                    if (hr in 30..220) {
+                        _heartRate.value = hr
+                        Log.d(TAG, "Heart rate decoded from 0x08 frame: $hr bpm")
                     }
                 }
             }
             0x05 -> {
-                // Battery level packet (hypothesis)
+                // Unverified packet hypothesis; retain for diagnostics only.
                 if (data.size >= 2) {
                     val battery = data[1].toInt() and 0xFF
                     if (battery in 0..100) {
                         _battery.value = battery
-                        Log.d(TAG, "Battery: $battery%")
+                        Log.d(TAG, "Possible battery packet: $battery%")
                     }
                 }
             }
             0x0A -> {
-                // SpO2 packet (hypothesis)
+                // Unverified packet hypothesis; retain for diagnostics only.
                 if (data.size >= 3) {
                     val spo2 = data[2].toInt() and 0xFF
                     if (spo2 in 80..100) {
                         _spO2.value = spo2
-                        Log.d(TAG, "SpO2: $spo2%")
+                        Log.d(TAG, "Possible SpO2 packet: $spo2%")
                     }
                 }
             }
